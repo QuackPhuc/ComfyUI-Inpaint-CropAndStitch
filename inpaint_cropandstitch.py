@@ -973,6 +973,40 @@ class CPUProcessorLogic(ProcessorLogic):
 
         return output_image
 
+    def rotate_image(self, image, angle):
+        """Rotate image by angle (0, 90, 180, 270 degrees). Image shape: [B, H, W, C]"""
+        if angle == 0:
+            return image
+        results = []
+        for i in range(image.shape[0]):
+            img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
+            img_pil = Image.fromarray(img_np)
+            if angle == 90:
+                img_pil = img_pil.transpose(Image.ROTATE_90)
+            elif angle == 180:
+                img_pil = img_pil.transpose(Image.ROTATE_180)
+            elif angle == 270:
+                img_pil = img_pil.transpose(Image.ROTATE_270)
+            results.append(torch.from_numpy(np.array(img_pil)).float() / 255.0)
+        return torch.stack(results, dim=0).to(image.device)
+
+    def rotate_mask(self, mask, angle):
+        """Rotate mask by angle (0, 90, 180, 270 degrees). Mask shape: [B, H, W]"""
+        if angle == 0:
+            return mask
+        results = []
+        for i in range(mask.shape[0]):
+            mask_np = (mask[i].cpu().numpy() * 255).astype(np.uint8)
+            mask_pil = Image.fromarray(mask_np, mode="L")
+            if angle == 90:
+                mask_pil = mask_pil.transpose(Image.ROTATE_90)
+            elif angle == 180:
+                mask_pil = mask_pil.transpose(Image.ROTATE_180)
+            elif angle == 270:
+                mask_pil = mask_pil.transpose(Image.ROTATE_270)
+            results.append(torch.from_numpy(np.array(mask_pil)).float() / 255.0)
+        return torch.stack(results, dim=0).to(mask.device)
+
 
 class GPUProcessorLogic(ProcessorLogic):
     def rescale_i(self, samples, width, height, algorithm: str):
@@ -1726,6 +1760,24 @@ class GPUProcessorLogic(ProcessorLogic):
 
         return output_image
 
+    def rotate_image(self, image, angle):
+        """Rotate image by angle (0, 90, 180, 270 degrees). Image shape: [B, H, W, C]"""
+        if angle == 0:
+            return image
+        # Use torch.rot90 for GPU-efficient rotation
+        # k = number of 90-degree counterclockwise rotations
+        k = angle // 90
+        img = image.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+        img = torch.rot90(img, k=k, dims=[2, 3])
+        return img.permute(0, 2, 3, 1)  # Back to [B, H, W, C]
+
+    def rotate_mask(self, mask, angle):
+        """Rotate mask by angle (0, 90, 180, 270 degrees). Mask shape: [B, H, W]"""
+        if angle == 0:
+            return mask
+        k = angle // 90
+        return torch.rot90(mask, k=k, dims=[1, 2])
+
 
 class InpaintCropImproved:
     @classmethod
@@ -1886,6 +1938,14 @@ class InpaintCropImproved:
                 "device_mode": (
                     ["cpu (compatible)", "gpu (much faster)"],
                     {"default": "gpu (much faster)"},
+                ),
+                # Fisheye rotation
+                "fisheye_rotation": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Auto-rotate cropped region based on fisheye perspective (top-down view). Objects will be rotated to point downward for generation, then rotated back when stitching.",
+                    },
                 ),
             },
             "optional": {
