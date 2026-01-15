@@ -1989,7 +1989,7 @@ class InpaintCropImproved:
         output_target_height,
         output_padding,
         device_mode,
-        fisheye_rotation,
+        fisheye_rotation=False,
         mask=None,
         optional_context_mask=None,
     ):
